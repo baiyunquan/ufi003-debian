@@ -53,7 +53,9 @@ check_size() {
 }
 
 need_cmd bash
+need_cmd debugfs
 need_cmd gh
+need_cmd img2simg
 need_cmd mkfs.ext4
 need_cmd python3
 need_cmd sha256sum
@@ -97,8 +99,16 @@ ROOTFS_IMG="$OUT_DIR/rootfs.img"
 ROOTFS_RAW="$OUT_DIR/rootfs.raw"
 
 simg2img "$ROOTFS_IMG" "$ROOTFS_RAW" >/dev/null
+cat > "$OUT_DIR/fstab" <<EOF
+PARTUUID=$USERDATA_PARTUUID / ext4 defaults,noatime,commit=600,errors=remount-ro 0 1
+tmpfs /tmp tmpfs defaults,nosuid 0 0
+EOF
+debugfs -w -R "rm /etc/fstab" "$ROOTFS_RAW" >/dev/null 2>&1 || true
+debugfs -w -R "write $OUT_DIR/fstab /etc/fstab" "$ROOTFS_RAW" >/dev/null
+img2simg "$ROOTFS_RAW" "$ROOTFS_IMG" >/dev/null
 
-bash "$ROOT_DIR/scripts/patch-bootimg.sh" "$BOOT_IMG_PATH" "$OUT_DIR/custom-boot.img" "$KERNEL_TAG"
+ROOT_SPEC="PARTUUID=$USERDATA_PARTUUID" \
+	bash "$ROOT_DIR/scripts/patch-bootimg.sh" "$BOOT_IMG_PATH" "$OUT_DIR/custom-boot.img" "$KERNEL_TAG"
 
 python3 - "$BOOT_IMG_PATH" "$OUT_DIR/bootfs/vmlinuz" "$OUT_DIR/bootfs/initramfs" <<'PY'
 import struct
@@ -230,6 +240,7 @@ Package layout:
 Notes:
 - custom-boot.img is provided for fastboot boot testing only; it is larger than the 16 MiB boot partition.
 - ufi003-bootfs.img contains kernel + initramfs + extlinux config and is intended for lk1st/system boot.
+- rootfs /etc/fstab is patched to the live userdata PARTUUID.
 - rawprogram0.xml + patch0.xml can be used with edl qfil.
 EOF
 
@@ -243,6 +254,7 @@ EOF
 		rootfs.img.xz \
 		rootfs.raw \
 		custom-boot.img \
+		fstab \
 		rawprogram0.xml \
 		patch0.xml \
 		flash-ufi003-edl.sh \

@@ -4,6 +4,7 @@ set -eu
 BOOT_IMG="${1:-boot.img}"
 OUTPUT="${2:-custom-boot.img}"
 KERNEL_VERSION="${3:-6.12.94-1}"
+ROOT_SPEC="${ROOT_SPEC:-/dev/mmcblk0p27}"
 
 if [ ! -f "$BOOT_IMG" ]; then
 	echo "Downloading boot.img for kernel $KERNEL_VERSION ..."
@@ -19,7 +20,7 @@ PYTHON=$(command -v python3)
 $PYTHON << PYEOF
 import struct
 with open("$OUTPUT", "r+b") as f:
-    new_cmdline = "console=ttyMSM0,115200 root=/dev/mmcblk0p27 no_framebuffer=true rw"
+    new_cmdline = "console=ttyMSM0,115200 root=$ROOT_SPEC no_framebuffer=true rw"
     cmdline_bytes = new_cmdline.encode("ascii").ljust(512, b"\x00")
     data = f.read()
     patched = bytearray(data)
