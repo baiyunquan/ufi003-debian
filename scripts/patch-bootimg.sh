@@ -27,16 +27,15 @@ with open("$OUTPUT", "r+b") as f:
     f.seek(0)
     f.write(patched)
 
-f = open("$OUTPUT", "rb")
-f.read(8)
-kernel_size = struct.unpack('<I', f.read(4))[0]
-ramdisk_size = struct.unpack('<I', f.read(4))[0]
-second_size = struct.unpack('<I', f.read(4))[0]
-f.read(4)
-f.close()
+with open("$OUTPUT", "rb") as f:
+    header = f.read(48)
+kernel_size = struct.unpack('<I', header[8:12])[0]
+ramdisk_size = struct.unpack('<I', header[16:20])[0]
+second_size = struct.unpack('<I', header[24:28])[0]
+page_size = struct.unpack('<I', header[36:40])[0]
 
 import os
 total = os.path.getsize("$OUTPUT")
-print(f"kernel={kernel_size} ramdisk={ramdisk_size} second={second_size} total={total}")
+print(f"kernel={kernel_size} ramdisk={ramdisk_size} second={second_size} page_size={page_size} total={total}")
 PYEOF
 echo "Done: $(ls -lh "$OUTPUT")"

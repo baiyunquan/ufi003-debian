@@ -1,95 +1,50 @@
-name: Build UFI003 EDL-flashable image
+name: Build UFI003 EDL package
 
 on:
   workflow_dispatch:
+    inputs:
+      debian_tag:
+        description: Upstream ufi003-debian release tag
+        required: false
+        default: 13.5-15
+      kernel_tag:
+        description: Upstream ufi003-kernel release tag
+        required: false
+        default: 6.12.94-1
   push:
     branches:
       - master
     paths:
-      - 'rootfs/**'
-      - 'aboot/**'
+      - '.github/workflows/build-edl-flash.yml'
       - 'scripts/**'
-      - 'kernel/**'
 
-env:
-  KERNEL_VER: 6.12.94-1
+permissions:
+  contents: read
 
 jobs:
-  build:
+  repack:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DEBIAN_TAG: ${{ inputs.debian_tag || '13.5-15' }}
+      KERNEL_TAG: ${{ inputs.kernel_tag || '6.12.94-1' }}
     steps:
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-          sudo apt-get -y install \
-            debootstrap binfmt-support qemu-user-static \
-            android-sdk-libsparse-utils \
-            gcc-arm-none-eabi device-tree-compiler python3-pycryptodome
-
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build rootfs
+      - name: Install dependencies
         run: |
-          cd rootfs
-          sudo ./build.sh
-          xz -T0 -k rootfs.img
+          sudo apt-get -y update
+          sudo apt-get -y install android-sdk-libsparse-utils e2fsprogs python3 xz-utils
 
-      - name: Build bootloader (lk1st)
-        run: |
-          cd aboot
-          ./build.sh
-
-      - name: Prepare custom boot image
-        run: |
-          mkdir -p output
-          bash scripts/patch-bootimg.sh "" output/custom-boot.img "$KERNEL_VER"
-
-      - name: Create flash script
-        run: |
-          cat > output/flash-ufi003.sh << 'EOF'
-          #!/usr/bin/env bash
-          set -euo pipefail
-          ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-          EDL_PY=${EDL_PY:-python3}
-          EDL_SCRIPT=${EDL_SCRIPT:-"$ROOT_DIR/edl/edl.py"}
-
-          need_file() { [ -f "$1" ] || { echo "Missing: $1"; exit 1; }; }
-          need_file "$ROOT_DIR/emmc_appsboot-test-signed.mbn"
-          need_file "$ROOT_DIR/custom-boot.img"
-          need_file "$ROOT_DIR/rootfs.img"
-
-          echo "Flash sequence:"
-          echo "  1) EDL: aboot    <- emmc_appsboot-test-signed.mbn"
-          echo "  2) EDL: userdata <- rootfs.img"
-          echo "  3) Reset"
-          echo "  4) fastboot boot custom-boot.img"
-          echo "  5) From Debian: dd custom-boot.img -> boot partition"
-          read -r -p "Type 'flash' to continue: " confirm
-          [ "$confirm" = "flash" ] || exit 1
-
-          "$EDL_PY" "$EDL_SCRIPT" printgpt
-          "$EDL_PY" "$EDL_SCRIPT" w aboot "$ROOT_DIR/emmc_appsboot-test-signed.mbn"
-          "$EDL_PY" "$EDL_SCRIPT" w userdata "$ROOT_DIR/rootfs.img"
-          "$EDL_PY" "$EDL_SCRIPT" reset
-
-          echo "EDL flash done. Now run:"
-          echo "  fastboot boot $ROOT_DIR/custom-boot.img"
-          echo ""
-          echo "After Debian boots:"
-          echo "  scp $ROOT_DIR/custom-boot.img root@172.16.42.1:/tmp/"
-          echo "  ssh root@172.16.42.1 'dd if=/tmp/custom-boot.img of=/dev/mmcblk0p22 bs=1M'"
-          echo "  ssh root@172.16.42.1 'reboot'"
-          EOF
-          chmod +x output/flash-ufi003.sh
-          cp aboot/emmc_appsboot-test-signed.mbn output/
-          cp rootfs/rootfs.img output/rootfs.img
+      - name: Build EDL package from upstream releases
+        run: bash scripts/make-edl-package.sh output
 
       - name: List artifacts
-        run: ls -lh output/
+        run: ls -lh output
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ufi003-debian-flashable
-          path: output/
+          name: ufi003-debian-edl-package
+          path: output
