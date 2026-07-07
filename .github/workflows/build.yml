@@ -10,7 +10,7 @@ jobs:
         run: |
           sudo apt-get -y update
           sudo apt-get -y install debootstrap binfmt-support qemu-user-static android-sdk-libsparse-utils
-          sudo apt-get -y install gcc-arm-none-eabi device-tree-compiler python3-pycryptodome
+          sudo apt-get -y install fdisk gcc-arm-none-eabi device-tree-compiler python3-pycryptodome
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,6 +28,19 @@ jobs:
         run: |
           cd aboot
           ./build.sh
+
+      - name: Build EDL package
+        run: |
+          ROOTFS_XZ_PATH="$PWD/rootfs/rootfs.img.xz" \
+          BOOT_IMG_PATH="$PWD/kernel/boot.img" \
+          ABOOT_MBN_PATH="$PWD/aboot/emmc_appsboot-test-signed.mbn" \
+          bash scripts/make-edl-package.sh output
+
+      - name: Upload EDL package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ufi003-debian-edl-package
+          path: output
 
       - name: Generate release tag
         id: version
@@ -50,3 +63,4 @@ jobs:
             aboot/emmc_appsboot-test-signed.mbn
             kernel/*.img
             rootfs/rootfs.img.xz
+            output/*

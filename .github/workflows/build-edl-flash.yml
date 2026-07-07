@@ -35,7 +35,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install android-sdk-libsparse-utils e2fsprogs python3 xz-utils
+          sudo apt-get -y install android-sdk-libsparse-utils e2fsprogs fdisk python3 xz-utils
 
       - name: Build EDL package from upstream releases
         run: bash scripts/make-edl-package.sh output

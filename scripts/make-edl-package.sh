@@ -12,19 +12,9 @@ UPSTREAM_KERNEL_REPO=${UPSTREAM_KERNEL_REPO:-KyonLi/ufi003-kernel}
 ROOTFS_XZ_PATH=${ROOTFS_XZ_PATH:-}
 BOOT_IMG_PATH=${BOOT_IMG_PATH:-}
 ABOOT_MBN_PATH=${ABOOT_MBN_PATH:-}
+WITH_GPT=${WITH_GPT:-1}
 
 SECTOR_SIZE=512
-ABOOT_PART_SIZE=$((0x00100000))
-BOOT_PART_SIZE=$((0x01000000))
-SYSTEM_PART_SIZE=$((0x32000000))
-USERDATA_PART_SIZE=$((0x97e6fe00))
-
-ABOOT_START_SECTOR=264192
-BOOT_START_SECTOR=396384
-SYSTEM_START_SECTOR=429152
-USERDATA_START_SECTOR=2428000
-
-USERDATA_PARTUUID=598664a9-7976-e692-dd1c-010c5d49b568
 
 need_cmd() {
 	command -v "$1" >/dev/null 2>&1 || {
@@ -54,10 +44,10 @@ check_size() {
 
 need_cmd bash
 need_cmd debugfs
-need_cmd gh
 need_cmd img2simg
 need_cmd mkfs.ext4
 need_cmd python3
+need_cmd sfdisk
 need_cmd sha256sum
 need_cmd simg2img
 need_cmd stat
@@ -72,6 +62,7 @@ if [ -n "$ROOTFS_XZ_PATH" ] || [ -n "$BOOT_IMG_PATH" ] || [ -n "$ABOOT_MBN_PATH"
 	need_file "$BOOT_IMG_PATH"
 	need_file "$ABOOT_MBN_PATH"
 else
+	need_cmd gh
 	gh release download "$DEBIAN_TAG" \
 		--repo "$UPSTREAM_DEBIAN_REPO" \
 		--pattern 'rootfs.img.xz' \
@@ -91,6 +82,22 @@ fi
 need_file "$ROOTFS_XZ_PATH"
 need_file "$BOOT_IMG_PATH"
 need_file "$ABOOT_MBN_PATH"
+
+if [ "$WITH_GPT" = "1" ]; then
+	bash "$ROOT_DIR/scripts/make-ufi003-gpt.sh" "$OUT_DIR" gpt
+	# shellcheck disable=SC1091
+	source "$OUT_DIR/gpt.env"
+else
+	ABOOT_PART_SIZE=$((0x00100000))
+	BOOT_PART_SIZE=$((0x01000000))
+	SYSTEM_PART_SIZE=$((0x32000000))
+	USERDATA_PART_SIZE=$((0x97e6fe00))
+	ABOOT_START_SECTOR=264192
+	BOOT_START_SECTOR=396384
+	SYSTEM_START_SECTOR=429152
+	USERDATA_START_SECTOR=2428000
+	USERDATA_PARTUUID=598664a9-7976-e692-dd1c-010c5d49b568
+fi
 
 cp "$ROOTFS_XZ_PATH" "$OUT_DIR/rootfs.img.xz"
 cp "$ABOOT_MBN_PATH" "$OUT_DIR/emmc_appsboot-test-signed.mbn"
@@ -172,6 +179,16 @@ check_size "$ROOTFS_RAW" "$USERDATA_PART_SIZE" "unsparsed rootfs image"
 cat > "$OUT_DIR/rawprogram0.xml" <<EOF
 <?xml version="1.0" ?>
 <data>
+EOF
+
+if [ "$WITH_GPT" = "1" ]; then
+cat >> "$OUT_DIR/rawprogram0.xml" <<EOF
+	<program SECTOR_SIZE_IN_BYTES="$SECTOR_SIZE" file_sector_offset="0" filename="gpt_main0.bin" label="PrimaryGPT" num_partition_sectors="34" partofsingleimage="true" physical_partition_number="0" readbackverify="false" size_in_KB="17.0" sparse="false" start_byte_hex="0x0" start_sector="0"/>
+	<program SECTOR_SIZE_IN_BYTES="$SECTOR_SIZE" file_sector_offset="0" filename="gpt_backup0.bin" label="BackupGPT" num_partition_sectors="33" partofsingleimage="true" physical_partition_number="0" readbackverify="false" size_in_KB="16.5" sparse="false" start_byte_hex="0x$(printf '%x' $((GPT_BACKUP_START * SECTOR_SIZE)))" start_sector="$GPT_BACKUP_START"/>
+EOF
+fi
+
+cat >> "$OUT_DIR/rawprogram0.xml" <<EOF
 	<program SECTOR_SIZE_IN_BYTES="$SECTOR_SIZE" file_sector_offset="0" filename="emmc_appsboot-test-signed.mbn" label="aboot" num_partition_sectors="2048" partofsingleimage="false" physical_partition_number="0" readbackverify="false" size_in_KB="1024.0" sparse="false" start_byte_hex="0x8100000" start_sector="$ABOOT_START_SECTOR"/>
 	<program SECTOR_SIZE_IN_BYTES="$SECTOR_SIZE" file_sector_offset="0" filename="zero-boot.bin" label="boot" num_partition_sectors="32768" partofsingleimage="false" physical_partition_number="0" readbackverify="false" size_in_KB="16384.0" sparse="false" start_byte_hex="0xc18c000" start_sector="$BOOT_START_SECTOR"/>
 	<program SECTOR_SIZE_IN_BYTES="$SECTOR_SIZE" file_sector_offset="0" filename="ufi003-bootfs.img" label="system" num_partition_sectors="1638400" partofsingleimage="false" physical_partition_number="0" readbackverify="false" size_in_KB="819200.0" sparse="false" start_byte_hex="0xd18c000" start_sector="$SYSTEM_START_SECTOR"/>
@@ -238,6 +255,7 @@ Package layout:
 - userdata <- rootfs.img
 
 Notes:
+- The package can restore a known-good UFI003 GPT before writing partitions.
 - custom-boot.img is provided for fastboot boot testing only; it is larger than the 16 MiB boot partition.
 - ufi003-bootfs.img contains kernel + initramfs + extlinux config and is intended for lk1st/system boot.
 - rootfs /etc/fstab is patched to the live userdata PARTUUID.
@@ -246,19 +264,30 @@ EOF
 
 (
 	cd "$OUT_DIR"
-	sha256sum \
-		emmc_appsboot-test-signed.mbn \
-		zero-boot.bin \
-		ufi003-bootfs.img \
-		rootfs.img \
-		rootfs.img.xz \
-		rootfs.raw \
-		custom-boot.img \
-		fstab \
-		rawprogram0.xml \
-		patch0.xml \
-		flash-ufi003-edl.sh \
-		BUILD_INFO.txt > SHA256SUMS
+	files=(
+		emmc_appsboot-test-signed.mbn
+		zero-boot.bin
+		ufi003-bootfs.img
+		rootfs.img
+		rootfs.img.xz
+		rootfs.raw
+		custom-boot.img
+		fstab
+		rawprogram0.xml
+		patch0.xml
+		flash-ufi003-edl.sh
+		BUILD_INFO.txt
+	)
+	if [ "$WITH_GPT" = "1" ]; then
+		files=(
+			gpt_both0.bin
+			gpt_main0.bin
+			gpt_backup0.bin
+			gpt.env
+			"${files[@]}"
+		)
+	fi
+	sha256sum "${files[@]}" > SHA256SUMS
 )
 
 echo "EDL package created in $OUT_DIR"
