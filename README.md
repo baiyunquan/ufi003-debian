@@ -29,9 +29,16 @@ reboot
 这次在 `UFI003_MB_V02` 上跑通之后，最重要的经验不是某个单独镜像，而是下面这两点:
 
 1. 不要假设目标设备还保留着原始分区表。之前反复试刷后，设备上的 GPT 很可能已经和项目默认假设不一致。
-2. `boot.img` 大于 16 MiB 的时候，不适合直接写入 `boot` 分区；更稳妥的方案是让 `lk1st` 从 `system` 分区里的 `bootfs` 启动，再把 Debian rootfs 放进 `userdata`。
+2. 这台设备目前已验证可启动的路线是 `boot + rootfs`，不是 `system + userdata`。也就是说，boot chain、GPT 和 rootfs 挂载方式必须一起匹配。
 
-因此现在推荐的 `ufi003-debian` 刷写路径是:
+当前已验证可启动的路径是:
+
+1. 使用 success-case 那套 `boot + rootfs` GPT
+2. 写入与之匹配的 `sbl1/rpm/tz/hyp/aboot`
+3. 写入 `boot` 和 `rootfs`
+4. 视需要恢复设备自己的 `fsc/fsg/modem/modemst1/modemst2/persist/sec`
+
+当前仓库里的 `ufi003-debian` EDL 包已经改回这条思路，它的打包路径是:
 
 1. 构建或下载 `rootfs.img.xz`
 2. 准备 `boot.img`
@@ -48,11 +55,10 @@ reboot
 
 这套 GPT 保持 `modem`、`fsc`、`fsg`、`persist`、`sec` 等前段布局不变，同时明确约束:
 
-* `boot` 分区保持 16 MiB，仅用于占位
-* `system` 分区用于存放 `bootfs`
-* `userdata` 分区用于存放 Debian rootfs
+* `boot` 分区为 64 MiB，用于直接放 patched `boot.img`
+* `rootfs` 分区占用余下大部分 eMMC，用于直接放 Debian rootfs
 
-这样做的意义是，哪怕目标机器之前被别的方案改乱过 GPT，只要还能进 EDL，这个包就能先恢复到 `ufi003-debian` 预期的分区布局，再继续刷系统。
+这样做的意义是，哪怕目标机器之前被别的方案改乱过 GPT，只要还能进 EDL，这个包就能先恢复到已验证的 UFI003 启动布局，再继续刷系统。
 
 ## 重新打包 EDL 产物
 
@@ -74,9 +80,10 @@ bash scripts/make-edl-package.sh output
 生成的 `output/` 目录会包含:
 
 * 可直接用于 `edl qfil` 的 `rawprogram0.xml` 和 `patch0.xml`
-* 自带 GPT 的刷写包
+* 已验证的 `boot + rootfs` GPT
+* bunded `sbl1/rpm/tz/hyp`
 * `flash-ufi003-edl.sh`
-* `custom-boot.img`，仅用于 fastboot 临时启动测试
+* `boot.bin` 和 `rootfs.img`
 
 ## GitHub Actions
 

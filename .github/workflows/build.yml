@@ -1,6 +1,9 @@
 name: Build debian
 on: push
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build debian
@@ -10,7 +13,7 @@ jobs:
         run: |
           sudo apt-get -y update
           sudo apt-get -y install debootstrap binfmt-support qemu-user-static android-sdk-libsparse-utils
-          sudo apt-get -y install fdisk gcc-arm-none-eabi device-tree-compiler python3-pycryptodome
+          sudo apt-get -y install e2fsprogs fdisk gcc-arm-none-eabi device-tree-compiler python3-pycryptodome xz-utils
 
       - name: Checkout
         uses: actions/checkout@v4
